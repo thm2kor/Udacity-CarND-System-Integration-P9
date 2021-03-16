@@ -13,7 +13,7 @@ This node will publish waypoints from the car's current position to some `x` dis
 Based on the code walkthrough lesson by Stephen and Aaron
 '''
 
-LOOKAHEAD_WPS = 50 # Number of waypoints after the current position which will be published
+LOOKAHEAD_WPS = 200 # Number of waypoints after the current position which will be published
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -88,7 +88,6 @@ class WaypointUpdater(object):
         '''
         lane = Lane()
         lane.waypoints = self.base_waypoints.waypoints[closest_idx: closest_idx+LOOKAHEAD_WPS]
-        rospy.loginfo("Publishing waypoints : Waypoints length {:d}".format(len(lane.waypoints)))
         self.final_waypoints_pub.publish(lane)
         
     def pose_cb(self, msg):

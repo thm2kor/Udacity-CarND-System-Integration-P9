@@ -15,7 +15,7 @@ class Controller(object):
         self.max_brake_torque = vehicle_mass * decel_limit * wheel_radius
         
         # initialize the controllers
-        self.speed_controller = PID(0.2, 0.0001, 0.1, decel_limit, accel_limit)
+        self.speed_controller = PID(0.15, 0.1, 0.01, decel_limit, accel_limit)
         self.steering_controller = YawController(wheel_base, steer_ratio, min_speed, 
                                                  max_lat_accel, max_steer_angle)
         # low pass filter for speeed
@@ -39,24 +39,22 @@ class Controller(object):
         current_time = rospy.get_time()
         if self.last_time is not None:
             dt =  (current_time - self.last_time)
-            # rospy.loginfo('Controller delta time - [{:.4f}]'.format(dt))
+            
+            self.low_pass_filter.filt(current_linear_velocity)
+            if self.low_pass_filter.ready:
+                current_linear_velocity = self.low_pass_filter.get()               
+            
+            steering = self.steering_controller.get_steering(target_linear_velocity, target_angular_velocity, current_linear_velocity)
+            
             error = target_linear_velocity - current_linear_velocity
             acceleration = self.speed_controller.step(error, dt)
-            # rospy.loginfo('Unfiltered acceleration  ==> {:.4f}'.format(acceleration))
-            
-            self.low_pass_filter.filt(acceleration)
-            if self.low_pass_filter.ready:
-                acceleration = self.low_pass_filter.get() 
-                # rospy.loginfo('Filtered acceleration  ==> {:.4f}'.format(acceleration))
-                
+               
             if acceleration > 0:
                 throttle = acceleration
             else:
                 brake = self.vehicle_mass * abs(acceleration) * self.wheel_radius    
-                # rospy.loginfo('Brake  ==> {:.4f}'.format(brake))
                 
         self.last_time = current_time
-        # calculate steering
-        steering = self.steering_controller.get_steering(target_linear_velocity, target_angular_velocity, current_linear_velocity)
+        # calculate steering       
         
         return throttle, brake, steering

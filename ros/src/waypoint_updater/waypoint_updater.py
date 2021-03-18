@@ -13,7 +13,7 @@ This node will publish waypoints from the car's current position to some `x` dis
 Based on the code walkthrough lesson by Stephen and Aaron
 '''
 
-LOOKAHEAD_WPS = 200 # Number of waypoints after the current position which will be published
+LOOKAHEAD_WPS = 50 # Number of waypoints after the current position which will be published
 
 class WaypointUpdater(object):
     def __init__(self):

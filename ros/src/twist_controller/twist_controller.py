@@ -1,4 +1,5 @@
 import rospy
+import numpy as np
 from pid import PID
 from yaw_controller import YawController
 from lowpass import LowPassFilter
@@ -43,17 +44,23 @@ class Controller(object):
             self.low_pass_filter.filt(current_linear_velocity)
             if self.low_pass_filter.ready:
                 current_linear_velocity = self.low_pass_filter.get()               
-            
+            # calculate steering values
             steering = self.steering_controller.get_steering(target_linear_velocity, target_angular_velocity, current_linear_velocity)
             
+            # calculate required acceleration or braking torgue
             error = target_linear_velocity - current_linear_velocity
             acceleration = self.speed_controller.step(error, dt)
-               
-            if acceleration > 0:
-                throttle = acceleration
+            if np.isclose(target_linear_velocity, 0) and current_linear_velocity < 0.2:
+                rospy.loginfo('appyling full brake : [{:.4f} Nm Target_vel:{:.4f} Cur_vel:{:.4f}] '.format(self.max_brake_torque, target_linear_velocity, current_linear_velocity ))
+                brake = self.max_brake_torque
+                throttle = 0.
             else:
-                brake = self.vehicle_mass * abs(acceleration) * self.wheel_radius    
-                
+                if acceleration > 0:
+                    throttle = acceleration
+                else:                
+                    brake = self.vehicle_mass * abs(acceleration) * self.wheel_radius
+                    rospy.loginfo('calculated brake request : [{:.4f}] Nm'.format(brake))
+
         self.last_time = current_time
         # calculate steering       
         

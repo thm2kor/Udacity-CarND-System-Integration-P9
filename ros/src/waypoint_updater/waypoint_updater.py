@@ -14,6 +14,8 @@ Based on the code walkthrough lesson by Stephen and Aaron
 '''
 
 LOOKAHEAD_WPS = 50 # Number of waypoints after the current position which will be published
+CONSTANT_DECEL = 1 / LOOKAHEAD_WPS  # for smooth braking
+MAX_DECEL = 0.5
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -87,7 +89,13 @@ class WaypointUpdater(object):
         Ending point is 'LOOKAHEAD_WPS' number away from the closest point  
         '''
         lane = Lane()
-        lane.waypoints = self.base_waypoints.waypoints[closest_idx: closest_idx+LOOKAHEAD_WPS]
+        sliced_waypoints = self.base_waypoints.waypoints[closest_idx: closest_idx+LOOKAHEAD_WPS]
+        
+        if (self.traffic_waypoint_index == -1) or (self.traffic_waypoint_index >= (closest_idx + LOOKAHEAD_WPS)):
+            lane.waypoints = sliced_waypoints
+        else:
+            # rospy.loginfo('declerating due to RED traffic light ... ')
+            lane.waypoints = self.decelerate_waypoints(sliced_waypoints, closest_idx)            
         self.final_waypoints_pub.publish(lane)
         
     def pose_cb(self, msg):
@@ -142,7 +150,27 @@ class WaypointUpdater(object):
             dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
             wp1 = i
         return dist
+    
+    def decelerate_waypoints(self, waypoints, closest_idx):
+        temp = []
+        for i, wp in enumerate(waypoints):
 
+            p = Waypoint()
+            p.pose = wp.pose
+
+            # Distance includes a number of waypoints back so front of car stops at line
+            stop_idx = max(self.traffic_waypoint_index - closest_idx - 2, 0)
+            dist = self.distance(waypoints, i, stop_idx)
+            vel = math.sqrt(2 * MAX_DECEL * dist) + (i * CONSTANT_DECEL)
+            if vel < 1.0:                
+                vel = 0.0
+
+            p.twist.twist.linear.x = min(vel, wp.twist.twist.linear.x)
+            temp.append(p)
+            ### TODO
+            # self.set_waypoint_velocity(waypoints, , 0)
+        
+        return temp
 
 if __name__ == '__main__':
     try:

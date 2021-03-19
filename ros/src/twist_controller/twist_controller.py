@@ -15,7 +15,7 @@ class Controller(object):
         self.max_brake_torque = vehicle_mass * decel_limit * wheel_radius
         
         # initialize the controllers
-        self.speed_controller = PID(0.15, 0.1, 0.01, decel_limit, accel_limit)
+        self.speed_controller = PID(0.15, 0.001, 0.10, decel_limit, accel_limit)
         self.steering_controller = YawController(wheel_base, steer_ratio, min_speed, 
                                                  max_lat_accel, max_steer_angle)
         # low pass filter for speeed

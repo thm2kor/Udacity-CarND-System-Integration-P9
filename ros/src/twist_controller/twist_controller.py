@@ -52,7 +52,7 @@ class Controller(object):
             acceleration = self.speed_controller.step(error, dt)
             if np.isclose(target_linear_velocity, 0) and current_linear_velocity < 0.2:
                 rospy.loginfo('appyling full brake : [{:.4f} Nm Target_vel:{:.4f} Cur_vel:{:.4f}] '.format(self.max_brake_torque, target_linear_velocity, current_linear_velocity ))
-                brake = self.max_brake_torque
+                brake = 400 #self.max_brake_torque
                 throttle = 0.
             else:
                 if acceleration > 0:

@@ -14,7 +14,7 @@ class Controller(object):
         self.vehicle_mass = vehicle_mass
         self.wheel_radius = wheel_radius
         self.max_brake_torque = vehicle_mass * decel_limit * wheel_radius
-        
+        self.decel_limit = decel_limit
         # initialize the controllers
         self.speed_controller = PID(0.15, 0.001, 0.10, decel_limit, accel_limit)
         self.steering_controller = YawController(wheel_base, steer_ratio, min_speed, 
@@ -31,37 +31,35 @@ class Controller(object):
         steering = 0.0
         throttle = 0.0
         brake = 0.0
-        
+        # return 0 if dbw is not enabled. Safety driver takes control
         if not dbw_enabled:
             self.speed_controller.reset()
-            return steering, throttle, brake
+            return throttle, brake, steering
         
-        # calculate throttle/brake
+        # calculate steering values
+        current_linear_velocity = self.low_pass_filter.filt(current_linear_velocity) 
+        steering = self.steering_controller.get_steering(target_linear_velocity, target_angular_velocity, current_linear_velocity)
+            
+        # calculate delta t
         current_time = rospy.get_time()
-        if self.last_time is not None:
-            dt =  (current_time - self.last_time)
-            
-            self.low_pass_filter.filt(current_linear_velocity)
-            if self.low_pass_filter.ready:
-                current_linear_velocity = self.low_pass_filter.get()               
-            # calculate steering values
-            steering = self.steering_controller.get_steering(target_linear_velocity, target_angular_velocity, current_linear_velocity)
-            
-            # calculate required acceleration or braking torgue
-            error = target_linear_velocity - current_linear_velocity
-            acceleration = self.speed_controller.step(error, dt)
-            if np.isclose(target_linear_velocity, 0) and current_linear_velocity < 0.2:
-                rospy.loginfo('appyling full brake : [{:.4f} Nm Target_vel:{:.4f} Cur_vel:{:.4f}] '.format(self.max_brake_torque, target_linear_velocity, current_linear_velocity ))
-                brake = 400 #self.max_brake_torque
-                throttle = 0.
-            else:
-                if acceleration > 0:
-                    throttle = acceleration
-                else:                
-                    brake = self.vehicle_mass * abs(acceleration) * self.wheel_radius
-                    rospy.loginfo('calculated brake request : [{:.4f}] Nm'.format(brake))
-
+        dt =  (current_time - self.last_time) if self.last_time else 0.02
         self.last_time = current_time
-        # calculate steering       
+           
+        # calculate throttle/brake 
+        error = target_linear_velocity - current_linear_velocity
+        throttle = self.speed_controller.step(error, dt)
+        brake = 0
         
+        if target_linear_velocity == 0 and current_linear_velocity < 0.1:
+            # full brake to stop the vehicle
+            throttle = 0
+            brake = 400
+            rospy.loginfo('applying full brake to stop'.format(brake))
+        elif throttle < 0.1 and error < 0:
+            # decelerate inline with the PID error or the vehicle decl. limit whichever is maximum
+            throttle = 0
+            deceleration = max (error, self.decel_limit)
+            brake = self.vehicle_mass * abs(deceleration) * self.wheel_radius
+            rospy.loginfo('applying brake request : [{:.4f}] Nm'.format(brake))
+ 
         return throttle, brake, steering

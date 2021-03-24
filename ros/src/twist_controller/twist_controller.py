@@ -16,8 +16,8 @@ class Controller(object):
         self.max_brake_torque = vehicle_mass * decel_limit * wheel_radius
         self.decel_limit = decel_limit
         # initialize the controllers
-        self.speed_controller = PID(0.15, 0.001, 0.10, decel_limit, accel_limit)
-        self.steering_controller = YawController(wheel_base, steer_ratio, min_speed, 
+        self.speed_controller = PID(0.3, 0.1, 0, 0, 0.2)
+        self.steering_controller = YawController(wheel_base, steer_ratio, 0.1, 
                                                  max_lat_accel, max_steer_angle)
         # low pass filter for speeed
         tau = 0.5 # cut-off frequency
@@ -49,17 +49,18 @@ class Controller(object):
         error = target_linear_velocity - current_linear_velocity
         throttle = self.speed_controller.step(error, dt)
         brake = 0
-        
+        # rospy.loginfo('target_linear_velocity = [{:.4f}] current_linear_velocity = [{:.4f}] throttle = [{:.4f}] error = [{:.4f}]'.format(target_linear_velocity,current_linear_velocity, throttle, error))
         if target_linear_velocity == 0 and current_linear_velocity < 0.1:
             # full brake to stop the vehicle
             throttle = 0
             brake = 400
-            rospy.loginfo('applying full brake to stop'.format(brake))
+            # rospy.loginfo('applying full brake to stop'.format(brake))
         elif throttle < 0.1 and error < 0:
             # decelerate inline with the PID error or the vehicle decl. limit whichever is maximum
             throttle = 0
             deceleration = max (error, self.decel_limit)
             brake = self.vehicle_mass * abs(deceleration) * self.wheel_radius
-            rospy.loginfo('applying brake request : [{:.4f}] Nm'.format(brake))
- 
+            # rospy.loginfo('applying brake request : [{:.4f}] Nm'.format(brake))
+            
+        # rospy.loginfo('throttle = [{:.4f}] brake = [{:.4f}] steering = [{:.4f}]'.format(throttle, brake, steering))
         return throttle, brake, steering

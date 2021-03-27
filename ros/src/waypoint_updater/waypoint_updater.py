@@ -16,7 +16,9 @@ Based on the code walkthrough lesson by Stephen Welch and Aaron Brown
 
 LOOKAHEAD_WPS = 100 # Number of waypoints after the current position which will be published
 MAX_DECEL = 0.5
-STOPPING_DISTANCE = 15
+DIST_BRAKE_START = 15
+DIST_HARD_BRAKING = 5
+DIST_APPLY_BRAKING = 10
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -43,7 +45,6 @@ class WaypointUpdater(object):
         self.traffic_waypoint_index = -1
         self.traffic_waypoint_x = -1
         self.traffic_waypoint_y = -1        
-        self.prev_idx = None
         # Instead of rospy.spin() , sleep() is called to publish final waypoints  
         # at regular intervals
         self.loop()
@@ -106,7 +107,7 @@ class WaypointUpdater(object):
 
         rospy.loginfo('sliced_waypoints size = {} closest_idx = {} stop_line_dist = {}'.format(len(sliced_waypoints), closest_idx, stop_line_dist))
         
-        if (self.traffic_waypoint_index == -1) or (stop_line_dist >= STOPPING_DISTANCE) :
+        if (self.traffic_waypoint_index == -1) or (stop_line_dist >= DIST_BRAKE_START) :
             lane.waypoints = sliced_waypoints    
         else:
             rospy.loginfo('declerating traffic_waypoint_index = {} closest_idx = {}'.format(self.traffic_waypoint_index, closest_idx))
@@ -122,8 +123,7 @@ class WaypointUpdater(object):
         msg.header - timestamped data, uniquely identified data with a frame-id
         msg.pose - representation of pose in free space, composed of position and orientation in free space in quaternion form 
         '''
-        self.pose = msg
-        
+        self.pose = msg        
     
     def waypoints_cb(self, waypoints):
         '''
@@ -148,9 +148,7 @@ class WaypointUpdater(object):
         self.traffic_waypoint_index = int(msg.data[0])        
         self.traffic_waypoint_x = msg.data[1]
         self.traffic_waypoint_y = msg.data[2]
-        
-    def velocity_cb(self, msg):
-        self.current_velocity = msg.twist.linear.x
+ 
         
     def obstacle_cb(self, msg):
         '''
@@ -164,30 +162,22 @@ class WaypointUpdater(object):
 
     def set_waypoint_velocity(self, waypoints, waypoint, velocity):
         waypoints[waypoint].twist.twist.linear.x = velocity
-
-    
-    def distance(self, waypoints, wp1, wp2):
-        dist = 0
-        dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2  + (a.z-b.z)**2)
-        for i in range(wp1, wp2+1):
-            dist += dl(waypoints[wp1].pose.pose.position, waypoints[i].pose.pose.position)
-            wp1 = i
-        return dist
     
     def decelerate_waypoints(self, waypoints, closest_idx):
         result = []
         for i, wp in enumerate(waypoints):
             p = Waypoint()
             p.pose = wp.pose
-            # Distance includes a number of waypoints back so front of car stops at line
-            stop_idx = max(self.traffic_waypoint_index - closest_idx - 2 , 0)
-            dist_to_stopline = self.distance(waypoints, i, stop_idx)
-            if dist_to_stopline <= 5:
+            # Distance includes a number of waypoints back so front of car stops at line            
+            stop_line_dist = math.sqrt((self.pose.pose.position.x-self.traffic_waypoint_x)**2 + 
+                                   (self.pose.pose.position.y-self.traffic_waypoint_y)**2)
+            # braking in three stages
+            if stop_line_dist <= DIST_HARD_BRAKING:
                 velocity = 0
-            elif dist_to_stopline <= 10: # velocity slopes down like a quadratic equation
-                velocity = math.sqrt(2 * MAX_DECEL * dist_to_stopline)
+            elif stop_line_dist <= DIST_APPLY_BRAKING: # velocity slopes down like a quadratic equation
+                velocity = math.sqrt(2 * MAX_DECEL * stop_line_dist)
             else:
-                velocity = wp.twist.twist.linear.x - (wp.twist.twist.linear.x/dist_to_stopline)
+                velocity = wp.twist.twist.linear.x - (wp.twist.twist.linear.x/stop_line_dist)
             
             if velocity < 1.0:
                 velocity = 0.0 

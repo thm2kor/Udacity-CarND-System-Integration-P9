@@ -15,10 +15,10 @@ Based on the code walkthrough lesson by Stephen Welch and Aaron Brown
 '''
 
 LOOKAHEAD_WPS = 100 # Number of waypoints after the current position which will be published
-MAX_DECEL = 0.5
-DIST_BRAKE_START = 15
-DIST_HARD_BRAKING = 5
-DIST_APPLY_BRAKING = 10
+MAX_DECEL = 0.5         # Max decleration during the "DIST_APPLY_BRAKING" phase
+DIST_BRAKE_START = 15   # Stopping distance after which braking starts
+DIST_HARD_BRAKING = 5   # Stopping distance after which hard braking starte
+DIST_APPLY_BRAKING = 10 # Stopping distance after which gradual braking starte
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -82,7 +82,7 @@ class WaypointUpdater(object):
 
         if val > 0:
             closest_idx = (closest_idx + 1) % len(self.waypoints_2d)
-        #rospy.loginfo("closest_idx={}".format(closest_idx))
+
         self.closest_waypoint_pub.publish(closest_idx)
         return closest_idx
     

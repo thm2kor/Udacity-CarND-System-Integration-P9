@@ -153,7 +153,7 @@ class TLDetector(object):
     def process_traffic_lights(self):
         
         closest_tl_wp_idx = 0
-        if (len(self.tl_xy) == 0 )
+        if (len(self.tl_xy) == 0 ):
             return
         
         closest_tl_wp_idx = min(self.tl_wp_idx)
@@ -174,7 +174,9 @@ class TLDetector(object):
             n_lights = len(self.lights)
             ds = []
             [ds.append(math.sqrt((stop_x - self.lights[i].pose.pose.position.x)**2 + (stop_y - self.lights[i].pose.pose.position.y)**2)) for i in range(n_lights)]
-            state = self.get_light_state(self.lights[np.argmin(ds)])        
+            
+            state = self.get_light_state(self.lights[np.argmin(ds)])
+        
             rospy.loginfo('closest_tl_xy=[{}] closest_tl_wp_idx=[{}]  state of traffic signal [{}]=[{}]'.format(closest_tl_xy, closest_tl_wp_idx, np.argmin(ds), state))
         
         return closest_tl_xy, closest_tl_wp_idx, state

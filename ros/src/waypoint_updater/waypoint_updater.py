@@ -4,17 +4,19 @@ import rospy
 import math
 import numpy as np
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, Float32MultiArray
 from styx_msgs.msg import Lane, Waypoint
 from scipy.spatial import KDTree
+from itertools import cycle, islice
 
 '''
 This node will publish waypoints from the car's current position to some `x` distance ahead.
-Based on the code walkthrough lesson by Stephen and Aaron
+Based on the code walkthrough lesson by Stephen Welch and Aaron Brown
 '''
 
-LOOKAHEAD_WPS = 50 # Number of waypoints after the current position which will be published
+LOOKAHEAD_WPS = 100 # Number of waypoints after the current position which will be published
 MAX_DECEL = 0.5
+STOPPING_DISTANCE = 15
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -26,12 +28,12 @@ class WaypointUpdater(object):
         # This list includes waypoints both before and after the vehicle. 
         # The publisher send this information only once.
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
-        rospy.Subscriber('/current_velocity', TwistStamped, self.velocity_cb)
         # Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
-        rospy.Subscriber('/traffic_waypoint', Int32, self.traffic_cb)
+        rospy.Subscriber('/traffic_waypoint', Float32MultiArray, self.traffic_cb)
 
-        self.final_waypoints_pub = rospy.Publisher('final_waypoints', Lane, queue_size=1)
-
+        self.final_waypoints_pub = rospy.Publisher('/final_waypoints', Lane, queue_size=1)
+        self.closest_waypoint_pub = rospy.Publisher('/closest_waypoint', Int32, queue_size=1)
+        
         # member variables for processing sub, pub information
         self.pose = None
         self.base_waypoints = None
@@ -39,8 +41,9 @@ class WaypointUpdater(object):
         self.waypoints_tree = None
         self.final_waypoints = None
         self.traffic_waypoint_index = -1
-        self.current_velocity = 0
-        self.max_velocity = 0
+        self.traffic_waypoint_x = -1
+        self.traffic_waypoint_y = -1        
+        self.prev_idx = None
         # Instead of rospy.spin() , sleep() is called to publish final waypoints  
         # at regular intervals
         self.loop()
@@ -48,15 +51,15 @@ class WaypointUpdater(object):
     def loop(self):
         """
         Main control loop. the published waypoints will be consumed by Autoware (Waypoint follower) which 
-        runs at 10 Hz.
+        runs at 20 Hz.
         """
-        rate = rospy.Rate(30)
+        rate = rospy.Rate(20)
         while not rospy.is_shutdown():
             if self.pose and self.base_waypoints and self.waypoints_tree:
                 closest_waypoint_idx = self.get_closest_waypoint_idx()
                 self.publish_waypoints(closest_waypoint_idx)
             rate.sleep()
-    
+            
     def get_closest_waypoint_idx(self):
         '''
         Returns the closest waypoint w.r.t to the current vehicle position  
@@ -78,9 +81,11 @@ class WaypointUpdater(object):
 
         if val > 0:
             closest_idx = (closest_idx + 1) % len(self.waypoints_2d)
-
+        #rospy.loginfo("closest_idx={}".format(closest_idx))
+        self.closest_waypoint_pub.publish(closest_idx)
         return closest_idx
-     
+    
+   
     def publish_waypoints(self, closest_idx):
         '''
         Slices a set of waypoints from the base_waypoints array. 
@@ -90,18 +95,25 @@ class WaypointUpdater(object):
         lane = Lane()
         lane.header.frame_id = '/world'
         lane.header.stamp = rospy.Time(0)
-
-        sliced_waypoints = self.base_waypoints.waypoints[closest_idx: closest_idx+LOOKAHEAD_WPS]     
         
-        if (self.traffic_waypoint_index == -1) or (self.traffic_waypoint_index >= (closest_idx + LOOKAHEAD_WPS )):
-            rospy.loginfo('accelerating ... @closest_index = {} @traffic_waypoint_index = {} '.format(closest_idx, self.traffic_waypoint_index))            
-            lane.waypoints = sliced_waypoints            
+        # keep looping around the track
+        if (closest_idx+1) % len(self.waypoints_2d) == 0:
+            closest_idx = 0
+        
+        sliced_waypoints = list(islice(cycle(self.base_waypoints.waypoints), closest_idx, closest_idx + LOOKAHEAD_WPS))
+        stop_line_dist = math.sqrt((self.pose.pose.position.x-self.traffic_waypoint_x)**2 + 
+                                   (self.pose.pose.position.y-self.traffic_waypoint_y)**2)
+
+        rospy.loginfo('sliced_waypoints size = {} closest_idx = {} stop_line_dist = {}'.format(len(sliced_waypoints), closest_idx, stop_line_dist))
+        
+        if (self.traffic_waypoint_index == -1) or (stop_line_dist >= STOPPING_DISTANCE) :
+            lane.waypoints = sliced_waypoints    
         else:
-            rospy.loginfo('declerating due to RED traffic light ... @  idx = {}'.format(closest_idx))
+            rospy.loginfo('declerating traffic_waypoint_index = {} closest_idx = {}'.format(self.traffic_waypoint_index, closest_idx))
             lane.waypoints = self.decelerate_waypoints(sliced_waypoints, closest_idx)            
-               
+        
         self.final_waypoints_pub.publish(lane)
-    
+        
     
     def pose_cb(self, msg):
         '''
@@ -111,6 +123,7 @@ class WaypointUpdater(object):
         msg.pose - representation of pose in free space, composed of position and orientation in free space in quaternion form 
         '''
         self.pose = msg
+        
     
     def waypoints_cb(self, waypoints):
         '''
@@ -124,17 +137,18 @@ class WaypointUpdater(object):
         self.base_waypoints = waypoints
         if not self.waypoints_2d:
             self.waypoints_2d = [[waypoint.pose.pose.position.x, waypoint.pose.pose.position.y] for waypoint in waypoints.waypoints]
-            rospy.loginfo("Waypoint Tree Initialited. Total count of waypoints : {}".format(len(self.waypoints_2d)))
+            rospy.loginfo("Waypoint tree initialited. Total count of waypoints : {}".format(len(self.waypoints_2d)))
             self.waypoints_tree = KDTree(self.waypoints_2d)
-            self.max_velocity = max([self.get_waypoint_velocity(waypoint) for waypoint in waypoints.waypoints])
             
     def traffic_cb(self, msg):
         '''
         callback handler for the ROS topic: /traffic_waypoint 
         msg: Int32 - indicates the index of the next traffic waypoint
         '''
-        self.traffic_waypoint_index = msg.data
-    
+        self.traffic_waypoint_index = int(msg.data[0])        
+        self.traffic_waypoint_x = msg.data[1]
+        self.traffic_waypoint_y = msg.data[2]
+        
     def velocity_cb(self, msg):
         self.current_velocity = msg.twist.linear.x
         
@@ -166,11 +180,11 @@ class WaypointUpdater(object):
             p = Waypoint()
             p.pose = wp.pose
             # Distance includes a number of waypoints back so front of car stops at line
-            stop_idx = max(self.traffic_waypoint_index - closest_idx - 4 , 0)
+            stop_idx = max(self.traffic_waypoint_index - closest_idx - 2 , 0)
             dist_to_stopline = self.distance(waypoints, i, stop_idx)
-            if dist_to_stopline <= 3:
+            if dist_to_stopline <= 5:
                 velocity = 0
-            elif dist_to_stopline <= 9: # velocity slopes down like a quadratic equation
+            elif dist_to_stopline <= 10: # velocity slopes down like a quadratic equation
                 velocity = math.sqrt(2 * MAX_DECEL * dist_to_stopline)
             else:
                 velocity = wp.twist.twist.linear.x - (wp.twist.twist.linear.x/dist_to_stopline)
@@ -178,7 +192,7 @@ class WaypointUpdater(object):
             if velocity < 1.0:
                 velocity = 0.0 
             p.twist.twist.linear.x = min(velocity, wp.twist.twist.linear.x)
-            result.append(p)           
+            result.append(p)          
         
         return result
     

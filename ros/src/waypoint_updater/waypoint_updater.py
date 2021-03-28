@@ -19,7 +19,8 @@ MAX_DECEL = 0.5         # Max decleration during the "DIST_APPLY_BRAKING" phase
 DIST_BRAKE_START = 15   # Stopping distance after which braking starts
 DIST_HARD_BRAKING = 5   # Stopping distance after which hard braking starte
 DIST_APPLY_BRAKING = 10 # Stopping distance after which gradual braking starte
-CONST_ACCLERATION = 2
+CONST_ACCLERATION = 2   # Acceleration factor when the vehicle is cruising
+SPIN_FREQUENCY = 20     # Frequency at which the waypoints will be updated
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -31,7 +32,7 @@ class WaypointUpdater(object):
         # This list includes waypoints both before and after the vehicle. 
         # The publisher send this information only once.
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
-        # Add a subscriber for /traffic_waypoint and current velocity 
+        # Add a subscriber for /traffic_waypoint, current and target velocity 
         rospy.Subscriber('/traffic_waypoint', Float32MultiArray, self.traffic_cb)
         rospy.Subscriber('/current_velocity', TwistStamped, self.velocity_cb)
         rospy.Subscriber('/target_velocity', Float32, self.target_velocity_cb)
@@ -49,24 +50,27 @@ class WaypointUpdater(object):
         self.traffic_waypoint_y = -1  
         self.current_velocity = 0
         # Instead of rospy.spin() , sleep() is called to publish final waypoints  
-        # at regular intervals
+        # at controlled intervals
         self.loop()
     
     def loop(self):
         """
         Main control loop. the published waypoints will be consumed by Autoware (Waypoint follower) which 
-        runs at 20 Hz.
+        runs at SPIN_FREQUENCY Hz.
         """
-        rate = rospy.Rate(20)
+        rate = rospy.Rate(SPIN_FREQUENCY)
         while not rospy.is_shutdown():
             if self.pose and self.base_waypoints and self.waypoints_tree:
+                # get the index of the closest waypoint next to the vehicles
                 closest_waypoint_idx = self.get_closest_waypoint_idx()
+                # publish LOOKAHEAD_WPS number of waypoints
                 self.publish_waypoints(closest_waypoint_idx)
             rate.sleep()
             
     def get_closest_waypoint_idx(self):
         '''
         Returns the closest waypoint w.r.t to the current vehicle position  
+        Based on the code walkthrough lesson by Stephen Welch and Aaron Brown
         '''
         x = self.pose.pose.position.x
         y = self.pose.pose.position.y
@@ -103,17 +107,20 @@ class WaypointUpdater(object):
         # keep looping around the track
         if (closest_idx+1) % len(self.waypoints_2d) == 0:
             closest_idx = 0
-        
+        # prepare a separate list of waypoints to be published
         sliced_waypoints = list(islice(cycle(self.base_waypoints.waypoints), closest_idx, closest_idx + LOOKAHEAD_WPS))
         stop_line_dist = math.sqrt((self.pose.pose.position.x-self.traffic_waypoint_x)**2 + 
                                    (self.pose.pose.position.y-self.traffic_waypoint_y)**2)
-
-        rospy.loginfo('sliced_waypoints size = {} closest_idx = {} stop_line_dist = {}'.format(len(sliced_waypoints), closest_idx, stop_line_dist))
+        # Instead of stop_line_dist, an offset of closest_idx could have been used. But i prefered the
+        # distance calculation method since it offers more control of the deceleration logic
         
+        # Set the velocities of the waypoints depending on the traffic conditions
         if (self.traffic_waypoint_index == -1) or (stop_line_dist >= DIST_BRAKE_START) :
+            # set velocities for constant acceleration if there is no RED traffic signal or 
+            # if the vehicle is far away from a traffic signal
             lane.waypoints = self.accelerate_waypoints(sliced_waypoints)    
         else:
-            rospy.loginfo('declerating traffic_waypoint_index = {} closest_idx = {}'.format(self.traffic_waypoint_index, closest_idx))
+            # set velocities for decleration
             lane.waypoints = self.decelerate_waypoints(sliced_waypoints, closest_idx)            
         
         self.final_waypoints_pub.publish(lane)
@@ -128,10 +135,22 @@ class WaypointUpdater(object):
         '''
         self.pose = msg        
     
-    def velocity_cb(self, msg):          
+    def velocity_cb(self, msg):
+        '''
+        callback handler for the ROS topic: /current_velocity 
+        msg: TwistStamped - indicates the current velocity of the vehicle
+        msg.header - timestamped data, uniquely identified data with a frame-id
+        msg.twist - representation of velocity in free space broken into its linear and angular parts.
+        msg.twist.linear - linear component for the (x,y,z) velocities
+        msg.twist.angular -  angular rate about the (x,y,z) axes
+        '''
         self.current_velocity = msg.twist.linear.x
     
-    def target_velocity_cb(self, msg):            
+    def target_velocity_cb(self, msg): 
+        '''
+        callback handler for the ROS topic: /target_velocity 
+        msg: Target velocity (Float32) published from waypoint_loader
+        '''
         self.target_velocity = msg.data
         
     def waypoints_cb(self, waypoints):
@@ -152,7 +171,9 @@ class WaypointUpdater(object):
     def traffic_cb(self, msg):
         '''
         callback handler for the ROS topic: /traffic_waypoint 
-        msg: Int32 - indicates the index of the next traffic waypoint
+        msg: Float32MultiArray- Index [0] - indicates the index of the next traffic waypoint
+        msg: Float32MultiArray- Index [1] - indicates the X coordinate of the next traffic waypoint
+        msg: Float32MultiArray- Index [2] - indicates the y coordinate of the next traffic waypoint
         '''
         self.traffic_waypoint_index = int(msg.data[0])        
         self.traffic_waypoint_x = msg.data[1]
@@ -167,13 +188,23 @@ class WaypointUpdater(object):
         pass
 
     def get_waypoint_velocity(self, waypoint):
+        '''
+        Returns the given velocity to the <waypoint> index within the <waypoints> list      
+        '''
         return waypoint.twist.twist.linear.x
 
     def set_waypoint_velocity(self, waypoints, waypoint, velocity):
+        '''
+        Sets the given velocity to the <waypoint> index within the <waypoints> list      
+        '''
         waypoints[waypoint].twist.twist.linear.x = velocity
     
     def accelerate_waypoints(self, waypoints):
-        
+        '''
+        Sets the velocity of the waypoints so that the vehicle accelerates smoothly within
+        the given limits of deceleration and jerk
+        Based on the code walkthrough lesson by Stephen Welch and Aaron Brown        
+        '''
         dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
         for i in range(len(waypoints)):
@@ -186,6 +217,11 @@ class WaypointUpdater(object):
         return waypoints
     
     def decelerate_waypoints(self, waypoints, closest_idx):
+        '''
+        Sets the velocity of the waypoints so that the vehicle declerates smoothly within
+        the given limits of deceleration and jerk
+        Based on the code walkthrough lesson by Stephen Welch and Aaron Brown        
+        '''
         result = []
         for i, wp in enumerate(waypoints):
             p = Waypoint()

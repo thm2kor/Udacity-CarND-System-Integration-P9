@@ -7,9 +7,7 @@ from geometry_msgs.msg import TwistStamped
 from twist_controller import Controller
 
 ''' 
-Once messages are being published to /final_waypoints, the vehicle's waypoint follower will publish twist commands
-to the /twist_cmd topic.This node will subscribe to /twist_cmd and use various controllers to provide appropriate 
-throttle, brake, and steering commands. These commands can then be published to the following topics:
+Once messages are being published to /final_waypoints, the vehicle's waypoint follower will publish twist commands to the /twist_cmd topic.This node will subscribe to /twist_cmd and use various controllers to provide appropriate throttle, brake, and steering commands. These commands can then be published to the following topics:
 
     /vehicle/throttle_cmd
     /vehicle/brake_cmd
@@ -20,10 +18,9 @@ the PID controllers will start to accumulate error. To avoid this scenario, the 
 checked before publishing the actuator commands. The DBW status is determined by subscribing to /vehicle/dbw_enabled. 
 
 This node is currently set up to publish steering, throttle, and brake commands at 50hz. 
-The DBW system on Carla expects messages at this frequency, and will disengage (reverting control back to the driver) 
-if control messages are published at less than 10hz.
+The DBW system on Carla expects messages at this frequency, and will disengage (reverting control back to the driver) if control messages are published at less than 10hz.
 
-The code is based on the code walk through by Aaron and Stephen.
+The code is based on the code walk through by Stephen Welch and Aaron Brown.
 '''
 
 class DBWNode(object):
@@ -38,7 +35,7 @@ class DBWNode(object):
         wheel_radius = rospy.get_param('~wheel_radius', 0.2413)
         wheel_base = rospy.get_param('~wheel_base', 2.8498)
         steer_ratio = rospy.get_param('~steer_ratio', 14.8)
-        min_speed = 0. # rospy.get_param('~min_speed', 0.1)
+        min_speed = rospy.get_param('~min_speed', 0.1)
         max_lat_accel = rospy.get_param('~max_lat_accel', 3.)
         max_steer_angle = rospy.get_param('~max_steer_angle', 8.)
         
@@ -72,7 +69,7 @@ class DBWNode(object):
     def loop(self):
         rate = rospy.Rate(50) # spin at a frequency of 50 hz
         while not rospy.is_shutdown():
-            # calculate the actuator commands only when the member variables are set by the callback funcitons
+            # calculate the actuator commands only when the member variables are set by the callback functions
             if not None in (self.target_angular_velocity, self.target_linear_velocity, 
                             self.current_angular_velocity, self.current_linear_velocity):
                 throttle, brake, steering = self.controller.control(self.target_angular_velocity,
@@ -109,7 +106,7 @@ class DBWNode(object):
         self.target_angular_velocity = msg.twist.angular.z
         
     def publish(self, throttle, brake, steer):
-        rospy.loginfo('Publishing ... [throttle ==> {:5.4f}, brake ==> {:5.4f}, steer ==> {:5.4f}]'.format(throttle, brake, steer))
+        # rospy.loginfo('Publishing ... [throttle ==> {:5.4f}, brake ==> {:5.4f}, steer ==> {:5.4f}]'.format(throttle, brake, steer))
         tcmd = ThrottleCmd()
         tcmd.enable = True
         tcmd.pedal_cmd_type = ThrottleCmd.CMD_PERCENT

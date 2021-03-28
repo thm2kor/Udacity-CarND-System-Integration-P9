@@ -4,7 +4,7 @@ import rospy
 import math
 import numpy as np
 from geometry_msgs.msg import PoseStamped, TwistStamped
-from std_msgs.msg import Int32, Float32MultiArray
+from std_msgs.msg import Int32, Float32, Float32MultiArray
 from styx_msgs.msg import Lane, Waypoint
 from scipy.spatial import KDTree
 from itertools import cycle, islice
@@ -19,6 +19,7 @@ MAX_DECEL = 0.5         # Max decleration during the "DIST_APPLY_BRAKING" phase
 DIST_BRAKE_START = 15   # Stopping distance after which braking starts
 DIST_HARD_BRAKING = 5   # Stopping distance after which hard braking starte
 DIST_APPLY_BRAKING = 10 # Stopping distance after which gradual braking starte
+CONST_ACCLERATION = 2
 
 class WaypointUpdater(object):
     def __init__(self):
@@ -30,9 +31,10 @@ class WaypointUpdater(object):
         # This list includes waypoints both before and after the vehicle. 
         # The publisher send this information only once.
         rospy.Subscriber('/base_waypoints', Lane, self.waypoints_cb)
-        # Add a subscriber for /traffic_waypoint and /obstacle_waypoint below
+        # Add a subscriber for /traffic_waypoint and current velocity 
         rospy.Subscriber('/traffic_waypoint', Float32MultiArray, self.traffic_cb)
-
+        rospy.Subscriber('/current_velocity', TwistStamped, self.velocity_cb)
+        rospy.Subscriber('/target_velocity', Float32, self.target_velocity_cb)
         self.final_waypoints_pub = rospy.Publisher('/final_waypoints', Lane, queue_size=1)
         self.closest_waypoint_pub = rospy.Publisher('/closest_waypoint', Int32, queue_size=1)
         
@@ -44,7 +46,8 @@ class WaypointUpdater(object):
         self.final_waypoints = None
         self.traffic_waypoint_index = -1
         self.traffic_waypoint_x = -1
-        self.traffic_waypoint_y = -1        
+        self.traffic_waypoint_y = -1  
+        self.current_velocity = 0
         # Instead of rospy.spin() , sleep() is called to publish final waypoints  
         # at regular intervals
         self.loop()
@@ -108,7 +111,7 @@ class WaypointUpdater(object):
         rospy.loginfo('sliced_waypoints size = {} closest_idx = {} stop_line_dist = {}'.format(len(sliced_waypoints), closest_idx, stop_line_dist))
         
         if (self.traffic_waypoint_index == -1) or (stop_line_dist >= DIST_BRAKE_START) :
-            lane.waypoints = sliced_waypoints    
+            lane.waypoints = self.accelerate_waypoints(sliced_waypoints)    
         else:
             rospy.loginfo('declerating traffic_waypoint_index = {} closest_idx = {}'.format(self.traffic_waypoint_index, closest_idx))
             lane.waypoints = self.decelerate_waypoints(sliced_waypoints, closest_idx)            
@@ -125,6 +128,12 @@ class WaypointUpdater(object):
         '''
         self.pose = msg        
     
+    def velocity_cb(self, msg):          
+        self.current_velocity = msg.twist.linear.x
+    
+    def target_velocity_cb(self, msg):            
+        self.target_velocity = msg.data
+        
     def waypoints_cb(self, waypoints):
         '''
         callback handler for the ROS topic: /base_waypoints 
@@ -162,6 +171,19 @@ class WaypointUpdater(object):
 
     def set_waypoint_velocity(self, waypoints, waypoint, velocity):
         waypoints[waypoint].twist.twist.linear.x = velocity
+    
+    def accelerate_waypoints(self, waypoints):
+        
+        dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
+
+        for i in range(len(waypoints)):
+            wp_prev = waypoints[i-1].pose.pose.position
+            wp_now = waypoints[i].pose.pose.position
+            set_velocity = min(self.target_velocity, 
+                               math.sqrt(self.current_velocity*self.current_velocity + 2*CONST_ACCLERATION*dl(wp_prev, wp_now)))
+            self.set_waypoint_velocity(waypoints, i, set_velocity)
+
+        return waypoints
     
     def decelerate_waypoints(self, waypoints, closest_idx):
         result = []

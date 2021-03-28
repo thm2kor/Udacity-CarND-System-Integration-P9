@@ -4,10 +4,6 @@ from pid import PID
 from yaw_controller import YawController
 from lowpass import LowPassFilter
 
-# GAS_DENSITY = 2.858
-# ONE_MPH = 0.44704
-
-
 class Controller(object):
     def __init__(self, vehicle_mass, wheel_radius, wheel_base, steer_ratio, min_speed,
                          max_lat_accel, max_steer_angle, accel_limit, decel_limit):
@@ -17,8 +13,7 @@ class Controller(object):
         self.decel_limit = decel_limit
         # initialize the controllers
         self.speed_controller = PID(0.3, 0.1, 0, 0, 0.2)
-        self.steering_controller = YawController(wheel_base, steer_ratio, 0.1, 
-                                                 max_lat_accel, max_steer_angle)
+        self.steering_controller = YawController(wheel_base, steer_ratio, 0.1, max_lat_accel, max_steer_angle)
         # low pass filter for speeed
         tau = 0.5 # cut-off frequency
         ts = 0.02 # 1/sample frequency 50Hz
@@ -49,18 +44,15 @@ class Controller(object):
         error = target_linear_velocity - current_linear_velocity
         throttle = self.speed_controller.step(error, dt)
         brake = 0
-        # rospy.loginfo('target_linear_velocity = [{:.4f}] current_linear_velocity = [{:.4f}] throttle = [{:.4f}] error = [{:.4f}]'.format(target_linear_velocity,current_linear_velocity, throttle, error))
+
         if target_linear_velocity == 0 and current_linear_velocity < 0.1:
             # full brake to stop the vehicle
             throttle = 0
-            brake = 400
-            # rospy.loginfo('applying full brake to stop'.format(brake))
+            brake = 400 # hint from the project notes            
         elif throttle < 0.1 and error < 0:
             # decelerate inline with the PID error or the vehicle decl. limit whichever is maximum
             throttle = 0
             deceleration = max (error, self.decel_limit)
             brake = self.vehicle_mass * abs(deceleration) * self.wheel_radius
-            # rospy.loginfo('applying brake request : [{:.4f}] Nm'.format(brake))
             
-        # rospy.loginfo('throttle = [{:.4f}] brake = [{:.4f}] steering = [{:.4f}]'.format(throttle, brake, steering))
         return throttle, brake, steering

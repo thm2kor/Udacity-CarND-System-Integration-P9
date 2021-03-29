@@ -48,7 +48,7 @@ class Controller(object):
         if target_linear_velocity == 0 and current_linear_velocity < 0.1:
             # full brake to stop the vehicle
             throttle = 0
-            brake = 400 # hint from the project notes            
+            brake = -self.max_brake_torque # hint from the project notes            
         elif throttle < 0.1 and error < 0:
             # decelerate inline with the PID error or the vehicle decl. limit whichever is maximum
             throttle = 0

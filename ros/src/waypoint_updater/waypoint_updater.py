@@ -26,17 +26,6 @@ class WaypointUpdater(object):
     def __init__(self):
         rospy.init_node('waypoint_updater')
         
-        # member variables for processing sub, pub information
-        self.pose = None
-        self.base_waypoints = None
-        self.waypoints_2d = None
-        self.waypoints_tree = None
-        self.final_waypoints = None
-        self.traffic_waypoint_index = -1
-        self.traffic_waypoint_x = -1
-        self.traffic_waypoint_y = -1  
-        self.current_velocity = 0
-        
         # Subscribing to vehicles current position
         rospy.Subscriber('/current_pose', PoseStamped, self.pose_cb)
         # Subscribing to a list of all waypoints for the track
@@ -50,7 +39,16 @@ class WaypointUpdater(object):
         self.final_waypoints_pub = rospy.Publisher('/final_waypoints', Lane, queue_size=1)
         self.closest_waypoint_pub = rospy.Publisher('/closest_waypoint', Int32, queue_size=1)
         
-        
+        # member variables for processing sub, pub information
+        self.pose = None
+        self.base_waypoints = None
+        self.waypoints_2d = None
+        self.waypoints_tree = None
+        self.final_waypoints = None
+        self.traffic_waypoint_index = -1
+        self.traffic_waypoint_x = -1
+        self.traffic_waypoint_y = -1  
+        self.current_velocity = 0
         # Instead of rospy.spin() , sleep() is called to publish final waypoints  
         # at controlled intervals
         self.loop()
@@ -203,9 +201,7 @@ class WaypointUpdater(object):
     
     def accelerate_waypoints(self, waypoints):
         '''
-        Sets the velocity of the waypoints so that the vehicle accelerates smoothly within
-        the given limits of deceleration and jerk
-        Based on the code walkthrough lesson by Stephen Welch and Aaron Brown        
+        Sets the velocity of the waypoints so that the vehicle accelerates smoothly          
         '''
         dl = lambda a, b: math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2)
 
